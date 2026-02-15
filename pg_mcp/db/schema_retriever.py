@@ -26,7 +26,7 @@ class SchemaRetriever:
         for table in self.schema.tables:
             score = 0
             t_name_lower = table.name.lower()
-            s_name_lower = table.schema.lower()
+            s_name_lower = table.schema_name.lower()
 
             # Table name match (higher weight)
             for kw in keywords:

@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     
     # OpenAI 配置
     openai_api_key: SecretStr
+    openai_base_url: Optional[str] = None
     openai_model: str = "gpt-5-mini"
     openai_timeout_s: int = 30
     

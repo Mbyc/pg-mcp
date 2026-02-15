@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 
 class OpenAIClient:
     def __init__(self) -> None:
-        self.client = AsyncOpenAI(api_key=settings.openai_api_key.get_secret_value())
+        self.client = AsyncOpenAI(
+            api_key=settings.openai_api_key.get_secret_value(),
+            base_url=settings.openai_base_url
+        )
 
     async def generate_sql(
         self, 
@@ -76,5 +79,5 @@ class OpenAIClient:
         summary = []
         for table in tables:
             cols = [f"{c.name} ({c.data_type})" for c in table.columns]
-            summary.append(f"Table: {table.schema}.{table.name}\nColumns: {', '.join(cols)}")
+            summary.append(f"Table: {table.schema_name}.{table.name}\nColumns: {', '.join(cols)}")
         return "\n\n".join(summary)

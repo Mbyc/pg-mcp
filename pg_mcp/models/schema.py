@@ -21,7 +21,7 @@ class ConstraintSchema(BaseModel):
 
 
 class TableSchema(BaseModel):
-    schema: str
+    schema_name: str = Field(alias="schema")
     name: str
     kind: str  # table | view | materialized_view
     columns: list[ColumnSchema] = Field(default_factory=list)

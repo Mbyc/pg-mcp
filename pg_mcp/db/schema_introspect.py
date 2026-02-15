@@ -47,7 +47,7 @@ async def introspect_schema(
         key = (r["table_schema"], r["table_name"])
         tbl = table_map.get(key)
         if tbl is None:
-            tbl = TableSchema(schema=r["table_schema"], name=r["table_name"], kind=_kind(r["table_type"]))
+            tbl = TableSchema(schema_name=r["table_schema"], name=r["table_name"], kind=_kind(r["table_type"]))
             table_map[key] = tbl
         tbl.columns.append(
             ColumnSchema(

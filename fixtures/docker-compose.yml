@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:16
+    container_name: pgmcp-postgres
+    environment:
+      POSTGRES_PASSWORD: zycx
+    ports:
+      - "5432:5432"
+    volumes:
+      - .:/fixtures
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  init:
+    image: postgres:16
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/fixtures
+    environment:
+      PGHOST: db
+      PGUSER: postgres
+      PGPASSWORD: zycx
+    command:
+      - bash
+      - -lc
+      - |
+        set -euo pipefail
+        for name in pgmcp_small pgmcp_medium pgmcp_large; do
+          dropdb --if-exists "$$name"
+          createdb "$$name"
+        done
+        psql -v ON_ERROR_STOP=1 -d pgmcp_small -f /fixtures/small/setup.sql
+        psql -v ON_ERROR_STOP=1 -d pgmcp_medium -f /fixtures/medium/setup.sql
+        psql -v ON_ERROR_STOP=1 -d pgmcp_large -f /fixtures/large/setup.sql
+        echo 'Database initialization complete!'
