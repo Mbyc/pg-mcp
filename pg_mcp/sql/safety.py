@@ -42,46 +42,48 @@ def validate_readonly_sql(
     if not allow_multi_statement and len(statements) != 1:
         reasons.append("multi_statement_not_allowed")
 
+    # Safely get expression classes to support different sqlglot versions
+    def _is_instance(node: exp.Expression, class_names: Iterable[str]) -> bool:
+        classes = []
+        for name in class_names:
+            cls = getattr(exp, name, None)
+            if cls is not None:
+                classes.append(cls)
+        return isinstance(node, tuple(classes)) if classes else False
+
     for stmt in statements:
         if isinstance(stmt, exp.Select):
             pass
         elif isinstance(stmt, exp.With):
-            # sqlglot sometimes represents WITH as exp.With wrapping the final statement
             if not isinstance(stmt.this, exp.Select):
                 reasons.append("with_must_wrap_select")
         elif isinstance(stmt, exp.Union):
-            # UNION of SELECTs is still readonly
             pass
         else:
             reasons.append(f"statement_not_allowed:{stmt.__class__.__name__}")
 
         for node in stmt.walk():
-            if isinstance(node, exp.Command):
+            if _is_instance(node, ["Command"]):
                 reasons.append("command_not_allowed")
 
-            if isinstance(node, exp.Insert) or isinstance(node, exp.Update) or isinstance(node, exp.Delete) or isinstance(node, exp.Merge):
+            if _is_instance(node, ["Insert", "Update", "Delete", "Merge"]):
                 reasons.append("dml_not_allowed")
 
-            if isinstance(node, exp.Create) or isinstance(node, exp.Alter) or isinstance(node, exp.Drop) or isinstance(node, exp.Truncate):
+            if _is_instance(node, ["Create", "Alter", "Drop", "Truncate"]):
                 reasons.append("ddl_not_allowed")
 
-            if isinstance(node, exp.Copy):
+            if _is_instance(node, ["Copy"]):
                 reasons.append("copy_not_allowed")
 
-            if isinstance(node, exp.Call) or isinstance(node, exp.Do):
+            if _is_instance(node, ["Call", "Do"]):
                 reasons.append("call_do_not_allowed")
 
-            if isinstance(node, exp.Set):
+            if _is_instance(node, ["Set"]):
                 reasons.append("set_not_allowed")
 
             if isinstance(node, exp.Func):
-                # Normalize function name including schema if present
-                # node.this might be an exp.Identifier or exp.Column/Table
-                # node.sql() is the most reliable way to get the full name as written
                 raw_fname = node.sql(dialect=dialect).split("(")[0].strip()
                 normalized_fname = _normalize_identifier(raw_fname)
-                
-                # Check both the full name and just the function name part
                 parts = normalized_fname.split(".")
                 func_only = parts[-1]
                 

@@ -36,18 +36,26 @@ class OpenAIClient:
         if error_context:
             user_content += f"\n\nNOTE: The previous SQL failed with this error: {error_context}. Please fix it."
 
-        # Using structured outputs for strict adherence to the schema
-        response = await self.client.beta.chat.completions.parse(
+        # DeepSeek and some OpenAI-compatible APIs don't support beta.chat.completions.parse (Structured Outputs)
+        # We fall back to regular completions + JSON mode
+        fallback_system = (
+            system_content
+            + "\n\nIMPORTANT: You MUST reply with ONLY a valid JSON object matching this structure: "
+            + "{\"sql\": \"...\", \"explanation\": \"...\", \"assumptions\": [], \"confidence\": 0.9, \"clarifying_questions\": []}"
+        )
+
+        response = await self.client.chat.completions.create(
             model=settings.openai_model,
             messages=[
-                {"role": "system", "content": system_content},
+                {"role": "system", "content": fallback_system},
                 {"role": "user", "content": user_content},
             ],
-            response_format=SqlGenerationResponse,
+            response_format={"type": "json_object"},
             timeout=settings.openai_timeout_s
         )
         
-        return response.choices[0].message.parsed
+        content = (response.choices[0].message.content or "").strip()
+        return SqlGenerationResponse.model_validate_json(content)
 
     async def validate_meaning(
         self,
@@ -63,17 +71,24 @@ class OpenAIClient:
             results_json=str(results[:5])
         )
         
-        response = await self.client.beta.chat.completions.parse(
+        fallback_system = (
+            "You are an expert data quality auditor. "
+            "IMPORTANT: You MUST reply with ONLY a valid JSON object matching this structure: "
+            "{\"matches_intent\": true/false, \"reason\": \"...\", \"suggested_fix\": null}"
+        )
+
+        response = await self.client.chat.completions.create(
             model=settings.openai_model,
             messages=[
-                {"role": "system", "content": "You are an expert data quality auditor. Always return JSON."},
+                {"role": "system", "content": fallback_system},
                 {"role": "user", "content": prompt},
             ],
-            response_format=MeaningValidationResponse,
+            response_format={"type": "json_object"},
             timeout=settings.openai_timeout_s
         )
         
-        return response.choices[0].message.parsed
+        content = (response.choices[0].message.content or "").strip()
+        return MeaningValidationResponse.model_validate_json(content)
 
     def _build_schema_summary(self, tables: list[TableSchema]) -> str:
         summary = []

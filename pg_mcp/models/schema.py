@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from pydantic import BaseModel, Field
+from pydantic.config import ConfigDict
 
 
 class ColumnSchema(BaseModel):
@@ -21,6 +22,8 @@ class ConstraintSchema(BaseModel):
 
 
 class TableSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     schema_name: str = Field(alias="schema")
     name: str
     kind: str  # table | view | materialized_view

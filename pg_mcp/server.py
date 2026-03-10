@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from typing import Literal
 
 import asyncpg
@@ -25,16 +26,25 @@ mcp = FastMCP("pg-mcp")
 async def pool_factory(db_name: str) -> asyncpg.Pool:
     db_config = next((db for db in settings.databases if db.name == db_name), None)
     if not db_config:
-        # Check if we can fall back to env-based single DB if no list provided
-        # But per PRD/Design, we expect a configured list or specific envs
         raise ValueError(f"Database configuration for '{db_name}' not found in PGMCP_DATABASES")
     
-    logger.info(f"Initializing connection pool for database: {db_name}")
+    # Debug: log the target DSN (masked password)
+    masked_dsn = db_config.dsn
+    if "@" in masked_dsn:
+        prefix, suffix = masked_dsn.split("@", 1)
+        if ":" in prefix:
+            base, _ = prefix.rsplit(":", 1)
+            masked_dsn = f"{base}:****@{suffix}"
+    
+    logger.info(f"Initializing connection pool for {db_name} targeting {masked_dsn}")
+    
+    # Increase timeout to 30s to handle slow local starts or high load
     return await asyncpg.create_pool(
         dsn=db_config.dsn,
         min_size=settings.pool_min_size,
         max_size=settings.pool_max_size,
-        timeout=10.0
+        timeout=30.0,
+        ssl=False
     )
 
 # Singleton components
@@ -51,6 +61,63 @@ query_service = QueryService(
     schema_cache=schema_cache,
     llm_client=llm_client
 )
+
+@mcp.tool()
+async def health() -> dict:
+    import hashlib
+
+    try:
+        db_names = [db.name for db in settings.databases]
+    except Exception:
+        db_names = []
+
+    db_dsn_endpoints: list[dict[str, str | int]] = []
+    for db in settings.databases:
+        dsn = db.dsn
+        safe_dsn = dsn
+        if "@" in safe_dsn:
+            prefix, suffix = safe_dsn.split("@", 1)
+            if ":" in prefix:
+                base, _ = prefix.rsplit(":", 1)
+                safe_dsn = f"{base}:****@{suffix}"
+
+        endpoint: dict[str, str | int] = {"name": db.name, "dsn": safe_dsn}
+        for key in ("host", "port", "database"):
+            try:
+                v = asyncpg.connection._parse_connect_dsn(dsn)[key]  # type: ignore[attr-defined]
+                if v is not None:
+                    endpoint[key] = v
+            except Exception:
+                pass
+        db_dsn_endpoints.append(endpoint)
+
+    fingerprint_src = "|".join(
+        [
+            f"{db.name}:{db.dsn}" for db in settings.databases
+        ]
+        + [
+            f"default={settings.default_database}",
+            f"max_rows={settings.max_rows}",
+            f"statement_timeout_ms={settings.statement_timeout_ms}",
+            f"allow_multi_statement={settings.allow_multi_statement}",
+        ]
+    )
+
+    config_fingerprint_sha256 = hashlib.sha256(fingerprint_src.encode("utf-8")).hexdigest()
+
+    return {
+        "status": "ok",
+        "server": "pg-mcp",
+        "tools": ["health", "query"],
+        "configured_databases": db_names,
+        "default_database": settings.default_database,
+        "max_rows": settings.max_rows,
+        "statement_timeout_ms": settings.statement_timeout_ms,
+        "allow_multi_statement": settings.allow_multi_statement,
+        "meaning_validation_enabled": settings.meaning_validation_enabled,
+        "db_dsn_endpoints": db_dsn_endpoints,
+        "config_fingerprint_sha256": config_fingerprint_sha256,
+    }
 
 @mcp.tool()
 async def query(
@@ -86,6 +153,12 @@ async def query(
 
 def main():
     """Main entry point for the MCP server."""
+    # Ensure UTF-8 output on Windows
+    if sys.platform == "win32":
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+        
     logger.info("Starting pg-mcp server via FastMCP...")
     mcp.run()
 
